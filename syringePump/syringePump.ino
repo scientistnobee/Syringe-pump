@@ -1,15 +1,9 @@
 // Controls a stepper motor via an LCD keypad shield.
 // Accepts triggers and serial commands.
-// To run, you will need the LCDKeypad library installed - see libraries dir.
-
-// Serial commands:
-// Set serial baud rate to 57600 and terminate commands with newlines.
-// Send a number, e.g. "100", to set bolus size.
-// Send a "+" to push that size bolus.
-// Send a "-" to pull that size bolus.
 
 #include <LiquidCrystal.h>
 #include <LCDKeypad.h>
+#include <AccelStepper.h>
 
 /* -- Constants -- */
 #define SYRINGE_VOLUME_ML 30.0
@@ -23,6 +17,7 @@
 
 long ustepsPerMM = MICROSTEPS_PER_STEP * STEPS_PER_REVOLUTION / THREADED_ROD_PITCH;
 long ustepsPerML = (MICROSTEPS_PER_STEP * STEPS_PER_REVOLUTION * SYRINGE_BARREL_LENGTH_MM) / (SYRINGE_VOLUME_ML * THREADED_ROD_PITCH );
+
 
 /* -- Pin definitions -- */
 int motorDirPin = 2;
@@ -45,8 +40,15 @@ enum{MAIN, BOLUS_MENU}; //UI states
 
 const int mLBolusStepsLength = 9;
 float mLBolusSteps[9] = {0.001, 0.005, 0.010, 0.050, 0.100, 0.500, 1.000, 5.000, 10.000};
+int flowrateStepsIdx = 3;
+float Flowrate = mLBolusSteps[flowrateStepsIdx]; //can go down to 20 or 30
+
+
 
 /* -- Default Parameters -- */
+int motorSpeed = 15000; //maximum steps per second
+int motorAccel = 150000; //steps/second/second to accelerate
+
 float mLBolus = 0.500; //default bolus size
 float mLBigBolus = 1.000; //default large bolus size
 float mLUsed = 0.0;
@@ -74,6 +76,7 @@ String serialStr = "";
 boolean serialStrReady = false;
 
 /* -- Initialize libraries -- */
+AccelStepper stepper(1, motorStepPin, motorDirPin); //the "1" tells it we are using a driver
 LiquidCrystal lcd(8, 13, 9, 4, 5, 6, 7);
 
 void setup(){
@@ -81,17 +84,13 @@ void setup(){
   lcd.begin(16, 2);
   lcd.clear();
 
-  lcd.print("SyringePump v2.0");
+  lcd.print("SyringePump v1.0");
 
   /* Triggering setup */
   pinMode(triggerPin, INPUT);
   pinMode(bigTriggerPin, INPUT);
   digitalWrite(triggerPin, HIGH); //enable pullup resistor
   digitalWrite(bigTriggerPin, HIGH); //enable pullup resistor
-  
-  /* Motor Setup */ 
-  pinMode(motorDirPin, OUTPUT);
-  pinMode(motorStepPin, OUTPUT);
   
   /* Serial setup */
   //Note that serial commands must be terminated with a newline
@@ -182,6 +181,10 @@ void bolus(int direction){
   
 	//change units to steps
 	long steps = (mLBolus * ustepsPerML);
+        Serial.println("steps");
+        Serial.println(steps, DEC);
+        Serial.println("mLBolus");
+        Serial.println(mLBolus, DEC);
 	if(direction == PUSH){
                 digitalWrite(motorDirPin, HIGH);
 		steps = mLBolus * ustepsPerML;
@@ -197,10 +200,12 @@ void bolus(int direction){
 		}
 	}	
 
-      float usDelay = SPEED_MICROSECONDS_DELAY; //can go down to 20 or 30
+      int usDelay=1.0e6/float(Flowrate*2.0*ustepsPerML);
+
     
-      for(int i=0; i < steps; i++){ 
+      for(long i=0; i < steps; i++){ 
         digitalWrite(motorStepPin, HIGH); 
+        
         delayMicroseconds(usDelay); 
     
         digitalWrite(motorStepPin, LOW); 
@@ -254,6 +259,8 @@ void doKeyAction(unsigned int key){
 		}
 	}
 
+
+
 	if(uiState == MAIN){
 		if(key == KEY_LEFT){
 			bolus(PULL);
@@ -275,10 +282,17 @@ void doKeyAction(unsigned int key){
 	}
 	else if(uiState == BOLUS_MENU){
 		if(key == KEY_LEFT){
-			//nothin'
+		       if((Flowrate - mLBolusStep) > 0){
+			  Flowrate -= mLBolusStep;
+			}
+			else{
+			  Flowrate = 0;
+			}
+	
 		}
 		if(key == KEY_RIGHT){
-			//nothin'
+                 			Flowrate += mLBolusStep;      
+			
 		}
 		if(key == KEY_UP){
 			if(mLBolusStepIdx < mLBolusStepsLength-1){
@@ -307,8 +321,8 @@ void updateScreen(){
 		s2 = (String("Bolus ") + decToString(mLBolus) + String(" mL"));		
 	}
 	else if(uiState == BOLUS_MENU){
-		s1 = String("Menu> BolusStep");
-		s2 = decToString(mLBolusStep);
+		s1 = String("BolusStep ")+decToString(mLBolusStep);
+		s2 = String("Flow rate ")+decToString(Flowrate);
 	}
 
 	//do actual screen update
