@@ -201,7 +201,8 @@ void bolus(int direction){
 	}	
 
       int usDelay=1.0e6/float(Flowrate*2.0*ustepsPerML);
-
+	//to see the above calculation of usDelay, look in to the below python link
+//http://www.codeskulptor.org/#user39_GgRMbeBVUD_4.py
     
       for(long i=0; i < steps; i++){ 
         digitalWrite(motorStepPin, HIGH); 
